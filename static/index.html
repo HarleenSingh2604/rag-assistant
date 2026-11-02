@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RAG Assistant</title>
+<style>
+  :root { --bg:#f7f7f8; --card:#fff; --text:#1c1c1e; --muted:#6b6b70; --accent:#2f5fd0; --border:#e2e2e6; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161618; --card:#202023; --text:#f2f2f4; --muted:#9a9aa2; --accent:#7ea2ff; --border:#34343a; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font-family: system-ui, sans-serif; background:var(--bg); color:var(--text); }
+  main { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  p.sub { color: var(--muted); margin: 0 0 20px; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:12px; padding:16px; margin-bottom:16px; }
+  h2 { font-size:1rem; margin:0 0 12px; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 14px; cursor:pointer; font-size:.95rem; }
+  button.link { background:none; color:var(--muted); padding:0 4px; }
+  button:disabled { opacity:.5; cursor:default; }
+  input[type=text] { width:100%; padding:10px; border-radius:8px; border:1px solid var(--border); background:var(--bg); color:var(--text); font-size:1rem; }
+  ul { list-style:none; padding:0; margin:12px 0 0; }
+  li { display:flex; justify-content:space-between; padding:6px 0; border-top:1px solid var(--border); font-size:.95rem; }
+  .row { display:flex; gap:8px; }
+  .answer { white-space:pre-wrap; line-height:1.5; }
+  .source { border-left:3px solid var(--accent); padding:6px 10px; margin-top:10px; font-size:.85rem; color:var(--muted); }
+  .error { color:#c0392b; }
+</style>
+</head>
+<body>
+<main>
+  <h1>RAG Assistant</h1>
+  <p class="sub">Upload your documents, then ask questions. Answers come only from your files, using a local model.</p>
+
+  <section class="card">
+    <h2>1. Documents</h2>
+    <input id="file" type="file" accept=".txt,.md,.pdf">
+    <button id="upload">Upload</button>
+    <div id="uploadMsg"></div>
+    <ul id="docs"></ul>
+  </section>
+
+  <section class="card">
+    <h2>2. Ask a question</h2>
+    <div class="row">
+      <input id="question" type="text" placeholder="e.g. What projects have I built?">
+      <button id="ask">Ask</button>
+    </div>
+    <div id="result"></div>
+  </section>
+</main>
+<script>
+const $ = (id) => document.getElementById(id);
+
+function esc(text) {
+  const d = document.createElement("div");
+  d.textContent = text;
+  return d.innerHTML;
+}
+
+async function loadDocs() {
+  const res = await fetch("/api/documents");
+  const docs = await res.json();
+  $("docs").innerHTML = docs.length
+    ? docs.map(d => `<li><span>${esc(d.name)} (${d.chunks} chunks)</span><button class="link" data-name="${esc(d.name)}">remove</button></li>`).join("")
+    : "<li>No documents yet</li>";
+}
+
+$("docs").addEventListener("click", async (e) => {
+  const name = e.target.dataset.name;
+  if (!name) return;
+  await fetch("/api/documents/" + encodeURIComponent(name), { method: "DELETE" });
+  loadDocs();
+});
+
+$("upload").addEventListener("click", async () => {
+  const file = $("file").files[0];
+  if (!file) { $("uploadMsg").innerHTML = '<p class="error">Choose a file first.</p>'; return; }
+  const form = new FormData();
+  form.append("file", file);
+  $("upload").disabled = true;
+  $("uploadMsg").textContent = "Reading and embedding... this can take a moment.";
+  try {
+    const res = await fetch("/api/documents", { method: "POST", body: form });
+    const body = await res.json();
+    $("uploadMsg").innerHTML = res.ok ? `Added ${esc(body.document)} (${body.chunks} chunks).` : `<p class="error">${esc(body.detail || "Upload failed")}</p>`;
+  } catch (err) {
+    $("uploadMsg").innerHTML = '<p class="error">Could not reach the server.</p>';
+  }
+  $("upload").disabled = false;
+  loadDocs();
+});
+
+async function ask() {
+  const question = $("question").value.trim();
+  if (question.length < 3) return;
+  $("ask").disabled = true;
+  $("result").textContent = "Thinking...";
+  try {
+    const res = await fetch("/api/ask", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ question })
+    });
+    const body = await res.json();
+    if (!res.ok) {
+      $("result").innerHTML = `<p class="error">${esc(typeof body.detail === "string" ? body.detail : "Request failed")}</p>`;
+    } else {
+      const sources = body.sources.map((s, i) =>
+        `<div class="source"><strong>[${i + 1}] ${esc(s.document)}</strong> (similarity ${s.score})<br>${esc(s.text.slice(0, 220))}...</div>`).join("");
+      $("result").innerHTML = `<p class="answer">${esc(body.answer)}</p>${sources}`;
+    }
+  } catch (err) {
+    $("result").innerHTML = '<p class="error">Could not reach the server.</p>';
+  }
+  $("ask").disabled = false;
+}
+$("ask").addEventListener("click", ask);
+$("question").addEventListener("keydown", (e) => { if (e.key === "Enter") ask(); });
+loadDocs();
+</script>
+</body>
+</html>
