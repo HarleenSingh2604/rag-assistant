@@ -1,5 +1,9 @@
 # RAG Assistant
 
+## Screenshots
+![Answer with sources](docs/answer.png)
+![Tests passing](docs/tests-passing(2).png)
+
 Ask questions about your own documents (resume, job notes, study material) and get answers grounded in those files. It runs completely free and offline using a local model through [Ollama](https://ollama.com).
 
 ## How it works
